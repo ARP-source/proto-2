@@ -1,0 +1,10 @@
+backtrader==1.9.78.123
+alpaca-trade-api==3.2.0
+clickhouse-connect==0.7.3
+arcticdb>=2.0.0
+redis==5.0.3
+PyPortfolioOpt==1.5.5
+numpy<2.0.0
+pandas==2.2.1
+statsmodels==0.14.1
+python-dotenv==1.0.1
