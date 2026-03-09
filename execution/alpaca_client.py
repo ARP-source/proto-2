@@ -15,8 +15,8 @@ class AlpacaExecutionClient:
     Implements a basic TWAP slice execution logic for routing large trades.
     """
     def __init__(self, api_key: str = None, api_secret: str = None, paper: bool = True):
-        self.api_key = api_key or os.getenv("ALPACA_API_KEY", "")
-        self.api_secret = api_secret or os.getenv("ALPACA_SECRET_KEY", "")
+        self.api_key = api_key or os.getenv("APCA_API_KEY_ID", "")
+        self.api_secret = api_secret or os.getenv("APCA_API_SECRET_KEY", "")
         self.trading_client = TradingClient(self.api_key, self.api_secret, paper=paper)
 
     def get_account_capital(self) -> float:

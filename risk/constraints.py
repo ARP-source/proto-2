@@ -58,7 +58,9 @@ class RiskConstraints:
 
     def apply_gateway(self, target_weights: Dict[str, float], historical_returns: pd.DataFrame) -> Dict[str, float]:
         """
-        Risk Gateway: If weights pass constraints, return them. If blocked, return empty dict (flatten).
+        Agent 11: Communicator - Execution Bridge
+        Risk Gateway: Evaluates proposed Risk Parity weights against the CVaR model.
+        If weights pass constraints, return them. If blocked, return empty dict (flatten).
         """
         if self.check_cvar_constraint(target_weights, historical_returns):
             return target_weights

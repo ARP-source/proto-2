@@ -1,14 +1,18 @@
 import pandas as pd
 import numpy as np
+import yfinance as yf
+import logging
+
+logger = logging.getLogger(__name__)
 
 class FeatureEngineer:
     """
-    Calculates rolling SMA, EMA, and rolling standard deviation (volatility)
-    for trading signals.
+    Calculates rolling SMA, EMA, rolling standard deviation (volatility),
+    and splices in fundamental data (Value/Quality factors) for ML pipelines.
     """
     
     @staticmethod
-    def add_features(df: pd.DataFrame, price_col: str = 'close') -> pd.DataFrame:
+    def add_technical_features(df: pd.DataFrame, price_col: str = 'close') -> pd.DataFrame:
         """
         Adds basic technical features to the DataFrame in-place.
         """
@@ -25,7 +29,41 @@ class FeatureEngineer:
         
         # Momentum (Rate of Change)
         df['roc_10'] = df[price_col].pct_change(periods=10)
+        df['roc_20'] = df[price_col].pct_change(periods=20)
         
+        return df
+
+    @staticmethod
+    def fetch_fundamentals(symbol: str) -> dict:
+        """
+        Agent 6: Fetch static fundamental data from yfinance.
+        Using trailing PE, Price-to-Book, and ROE as Value/Quality factors.
+        """
+        try:
+            ticker = yf.Ticker(symbol)
+            info = ticker.info
+            fundamentals = {
+                'trailingPE': info.get('trailingPE', np.nan),
+                'priceToBook': info.get('priceToBook', np.nan),
+                'returnOnEquity': info.get('returnOnEquity', np.nan),
+                'debtToEquity': info.get('debtToEquity', np.nan)
+            }
+            return fundamentals
+        except Exception as e:
+            logger.warning(f"Failed to fetch fundamentals for {symbol}: {e}")
+            return {'trailingPE': np.nan, 'priceToBook': np.nan, 'returnOnEquity': np.nan, 'debtToEquity': np.nan}
+
+    @staticmethod
+    def splice_features(df: pd.DataFrame, symbol: str) -> pd.DataFrame:
+        """
+        Combines technicals and static fundamentals into a single feature set.
+        """
+        df = FeatureEngineer.add_technical_features(df)
+        fundamentals = FeatureEngineer.fetch_fundamentals(symbol)
+        
+        for key, val in fundamentals.items():
+            df[key] = val
+            
         return df
 
     @staticmethod
