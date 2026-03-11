@@ -1,3 +1,5 @@
+import os
+import finnhub
 import pandas as pd
 import numpy as np
 import yfinance as yf
@@ -36,19 +38,30 @@ class FeatureEngineer:
     @staticmethod
     def fetch_fundamentals(symbol: str) -> dict:
         """
-        Agent 6: Fetch static fundamental data from yfinance.
+        Agent 6: Fetch static fundamental data from Finnhub.
         Using trailing PE, Price-to-Book, and ROE as Value/Quality factors.
         """
         try:
-            ticker = yf.Ticker(symbol)
-            info = ticker.info
-            fundamentals = {
-                'trailingPE': info.get('trailingPE', np.nan),
-                'priceToBook': info.get('priceToBook', np.nan),
-                'returnOnEquity': info.get('returnOnEquity', np.nan),
-                'debtToEquity': info.get('debtToEquity', np.nan)
-            }
-            return fundamentals
+            api_key = os.getenv("FINNHUB_API_KEY", "")
+            if not api_key:
+                logger.warning("FINNHUB_API_KEY not found in environment.")
+                return {'trailingPE': np.nan, 'priceToBook': np.nan, 'returnOnEquity': np.nan, 'debtToEquity': np.nan}
+                
+            finnhub_client = finnhub.Client(api_key=api_key)
+            
+            # Use 'basic-financials' endpoint (metric section)
+            metrics = finnhub_client.company_basic_financials(symbol, 'all')
+            if metrics and 'metric' in metrics:
+                m = metrics['metric']
+                fundamentals = {
+                    'trailingPE': m.get('peInclExtraTTM', np.nan),
+                    'priceToBook': m.get('pbAnnual', np.nan),
+                    'returnOnEquity': m.get('roeTTM', np.nan),
+                    'debtToEquity': m.get('totalDebt/totalEquityAnnual', np.nan)
+                }
+                return fundamentals
+            else:
+                return {'trailingPE': np.nan, 'priceToBook': np.nan, 'returnOnEquity': np.nan, 'debtToEquity': np.nan}
         except Exception as e:
             logger.warning(f"Failed to fetch fundamentals for {symbol}: {e}")
             return {'trailingPE': np.nan, 'priceToBook': np.nan, 'returnOnEquity': np.nan, 'debtToEquity': np.nan}

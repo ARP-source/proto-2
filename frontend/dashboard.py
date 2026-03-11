@@ -1,162 +1,177 @@
 import streamlit as st
 import pandas as pd
-import plotly.graph_objects as go
+import json
 import os
+from datetime import datetime
+from dotenv import load_dotenv
+from alpaca.trading.client import TradingClient
 
-st.set_page_config(page_title="Quant Platform Dashboard", layout="wide", page_icon="📈")
+st.set_page_config(page_title="Alpha Vanguard | Live", layout="wide", page_icon="⚡")
 
-# --- Custom CSS for Premium Look ---
+# --- Custom CSS for Professional Nasdaq Look ---
 st.markdown("""
 <style>
-    /* Dark Theme Optimization */
+    /* Absolute Dark Mode / Raw Data Aesthetic */
     .stApp {
-        background-color: #0E1117;
-        color: #FAFAFA;
+        background-color: #0b0e14;
+        color: #e2e8f0;
+        font-family: 'Inter', 'SF Pro Display', sans-serif;
     }
     
-    /* Elegant Title */
-    h1 {
-        font-family: 'Inter', sans-serif;
-        background: -webkit-linear-gradient(45deg, #FF6B6B, #4ECDC4);
-        -webkit-background-clip: text;
-        -webkit-text-fill-color: transparent;
-        font-weight: 800;
-        margin-bottom: 0;
-    }
-    
-    /* Micro-animations on metrics */
-    div[data-testid="stMetricValue"] {
-        font-family: 'Inter', sans-serif;
+    h1, h2, h3 {
+        color: #ffffff;
         font-weight: 700;
-        transition: transform 0.2s ease;
+        letter-spacing: -0.5px;
     }
-    div[data-testid="stMetricValue"]:hover {
-        transform: scale(1.05);
+
+    h1 {
+        border-bottom: 1px solid #1e293b;
+        padding-bottom: 10px;
+        margin-bottom: 20px;
+        font-size: 24px;
+        text-transform: uppercase;
     }
     
-    /* Refined metric containers */
-    div[data-testid="stMetric"] {
-        background-color: #1E212B;
-        padding: 20px;
-        border-radius: 12px;
-        box-shadow: 0 4px 6px rgba(0,0,0,0.1);
-        border: 1px solid #2A2F3D;
+    /* Metrics Top Bar styling */
+    div[data-testid="metric-container"] {
+        background-color: #111827;
+        border: 1px solid #1f2937;
+        padding: 15px;
+        border-radius: 4px;
+        border-left: 4px solid #3b82f6; /* Accent */
     }
+    
+    /* Positive / Negative colors */
+    .pos-val { color: #10b981; font-weight: bold; }
+    .neg-val { color: #ef4444; font-weight: bold; }
+    
+    /* Clean tables */
+    .dataframe {
+        font-family: 'JetBrains Mono', monospace;
+        font-size: 13px;
+        color: #d1d5db;
+    }
+    
+    /* Hide Streamlit Branding elements */
+    #MainMenu {visibility: hidden;}
+    footer {visibility: hidden;}
 </style>
 """, unsafe_allow_html=True)
 
-st.title("Quantitative Trading Platform Live Dashboard")
-st.markdown("Monitor high-frequency strategy execution vs benchmark index performance.")
+# --- Server & State Initialization ---
+load_dotenv()
+API_KEY = os.getenv("APCA_API_KEY_ID", "")
+API_SECRET = os.getenv("APCA_API_SECRET_KEY", "")
 
-@st.cache_data(ttl=10)
-def load_data():
-    base_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
-    strat_file = os.path.join(base_dir, 'strategy_results.csv')
-    spy_file = os.path.join(base_dir, 'spy_benchmark.csv')
-    
-    if not os.path.exists(strat_file) or not os.path.exists(spy_file):
-        st.error(f"Files not found. Checked: {strat_file} and {spy_file}")
-        return None, None
-        
-    df_strat = pd.read_csv(strat_file, parse_dates=['date'])
-    df_spy = pd.read_csv(spy_file, parse_dates=['Date'])
-    
-    # Normalize dates and merge
-    df_strat.rename(columns={'date': 'Date'}, inplace=True)
-    df_strat['Date'] = pd.to_datetime(df_strat['Date']).dt.normalize()
-    df_spy['Date'] = pd.to_datetime(df_spy['Date']).dt.normalize()
-    
-    merged = pd.merge(df_strat, df_spy[['Date', 'Close']], on='Date', how='inner')
-    merged.rename(columns={'portfolio_value': 'Strategy', 'Close': 'SPY'}, inplace=True)
-    merged.sort_values(by='Date', inplace=True)
-    
-    # Normalize SPY to start at the same initial capital as the Strategy
-    initial_capital = merged['Strategy'].iloc[0]
-    initial_spy = merged['SPY'].iloc[0]
-    
-    merged['SPY_Normalized'] = (merged['SPY'] / initial_spy) * initial_capital
-    return merged, initial_capital
+@st.cache_resource
+def get_alpaca_client():
+    if not API_KEY or not API_SECRET:
+        return None
+    return TradingClient(API_KEY, API_SECRET, paper=True)
 
-merged_df, starting_capital = load_data()
+client = get_alpaca_client()
 
-if merged_df is None:
-    st.warning("Data files not found. Please run the backtester engine first to generate `strategy_results.csv` and `spy_benchmark.csv`.")
+def load_live_state():
+    state_path = os.path.join(os.path.dirname(__file__), '..', 'data', 'live_state.json')
+    if os.path.exists(state_path):
+        try:
+            with open(state_path, "r") as f:
+                return json.load(f)
+        except:
+            pass
+    return None
+
+# --- Top Header ---
+col_head, col_refresh = st.columns([8, 1])
+with col_head:
+    st.markdown("<h1>ALPHA VANGUARD | LIVE SYSTEM MONiTOR</h1>", unsafe_allow_html=True)
+with col_refresh:
+    if st.button("↻ REFRESH"):
+        pass # Streamlit natively re-runs on button press
+
+# --- Fetch Live Data ---
+if not client:
+    st.error("Alpaca API keys missing from .env. System halted.")
     st.stop()
 
-# --- Calculate Metrics ---
-current_strat = merged_df['Strategy'].iloc[-1]
-current_spy = merged_df['SPY_Normalized'].iloc[-1]
+try:
+    account = client.get_account()
+    equity = float(account.equity)
+    buying_power = float(account.buying_power)
+    day_pnl = float(account.equity) - float(account.last_equity)
+    day_pnl_pct = (day_pnl / float(account.last_equity)) * 100 if float(account.last_equity) > 0 else 0
+    
+    positions = client.get_all_positions()
+except Exception as e:
+    st.error(f"Alpaca Connection Error: {e}")
+    st.stop()
 
-strat_return = ((current_strat - starting_capital) / starting_capital) * 100
-spy_return = ((current_spy - starting_capital) / starting_capital) * 100
+state = load_live_state()
 
-def get_max_drawdown(series):
-    rolling_max = series.cummax()
-    drawdown = series / rolling_max - 1.0
-    return drawdown.min() * 100
-
-strat_mdd = get_max_drawdown(merged_df['Strategy'])
-spy_mdd = get_max_drawdown(merged_df['SPY_Normalized'])
-
-# --- Top Key Metrics Row ---
-st.markdown("### Executive Summary")
+# --- TOP TAPE ROW ---
 col1, col2, col3, col4 = st.columns(4)
+col1.metric("Gross Account Equity", f"${equity:,.2f}", f"${day_pnl:,.2f} ({day_pnl_pct:.2f}%)")
+col2.metric("Available Buying Power", f"${buying_power:,.2f}")
+col3.metric("Open Positions", len(positions))
 
-col1.metric("Strategy Final Value", f"${current_strat:,.2f}", f"{strat_return:.2f}%")
-col2.metric("S&P 500 Final Value", f"${current_spy:,.2f}", f"{spy_return:.2f}%")
-col3.metric("Strategy Max Drawdown", f"{strat_mdd:.2f}%", delta_color="inverse")
-col4.metric("S&P 500 Max Drawdown", f"{spy_mdd:.2f}%", delta_color="inverse")
+if state and "last_update" in state:
+    try:
+        last_dt = datetime.fromisoformat(state['last_update'])
+        col4.metric("Last Model Sync", last_dt.strftime("%H:%M:%S EST"))
+    except:
+        col4.metric("Last Model Sync", "N/A")
+else:
+    col4.metric("Last Model Sync", "Offline")
 
-# --- Interactive Plotly Chart ---
-st.markdown("### Equity Curve Comparison")
+st.markdown("<hr style='border:1px solid #1f2937'>", unsafe_allow_html=True)
 
-fig = go.Figure()
+# --- MAIN CONTENT LAYOUT ---
+left_col, right_col = st.columns([3, 2])
 
-fig.add_trace(go.Scatter(
-    x=merged_df['Date'], 
-    y=merged_df['Strategy'],
-    mode='lines',
-    name='Cross-Sectional Momentum',
-    line=dict(color='#4ECDC4', width=3),
-    fill='tozeroy',
-    fillcolor='rgba(78, 205, 196, 0.1)'
-))
+with left_col:
+    st.subheader("🔴 LIVE ALLOCATIONS (BROKER)")
+    if positions:
+        pos_data = []
+        for p in positions:
+            pnl_color = "pos-val" if float(p.unrealized_intraday_pl) >= 0 else "neg-val"
+            pos_data.append({
+                "Symbol": p.symbol,
+                "Shares": float(p.qty),
+                "Market Value": f"${float(p.market_value):,.2f}",
+                "Avg Entry": f"${float(p.avg_entry_price):,.2f}",
+                "Current PX": f"${float(p.current_price):,.2f}",
+                "Day PnL": f"${float(p.unrealized_intraday_pl):,.2f}",
+                "Day PnL %": f"{float(p.unrealized_intraday_plpc)*100:.2f}%"
+            })
+            
+        df_pos = pd.DataFrame(pos_data)
+        st.dataframe(df_pos, use_container_width=True, hide_index=True)
+    else:
+        st.info("No open positions in Alpaca portfolio.")
 
-fig.add_trace(go.Scatter(
-    x=merged_df['Date'], 
-    y=merged_df['SPY_Normalized'],
-    mode='lines',
-    name='S&P 500 Benchmark',
-    line=dict(color='#FF6B6B', width=2, dash='dot')
-))
-
-fig.update_layout(
-    plot_bgcolor='#0E1117',
-    paper_bgcolor='#0E1117',
-    font_color='#FAFAFA',
-    xaxis=dict(showgrid=True, gridcolor='#1E212B', title="Date"),
-    yaxis=dict(showgrid=True, gridcolor='#1E212B', title="Portfolio Value ($)", tickformat="$,.0f"),
-    hovermode="x unified",
-    legend=dict(
-        yanchor="top",
-        y=0.99,
-        xanchor="left",
-        x=0.01,
-        bgcolor="rgba(0,0,0,0.5)"
-    ),
-    margin=dict(l=40, r=40, t=40, b=40)
-)
-
-st.plotly_chart(fig, use_container_width=True)
-
-# --- Recent Decisions Data Table ---
-st.markdown("### Raw Series Output")
-st.dataframe(
-    merged_df.sort_values(by="Date", ascending=False).set_index("Date").style.format({
-        "Strategy": "${:,.2f}", 
-        "SPY": "${:,.2f}",
-        "SPY_Normalized": "${:,.2f}"
-    }),
-    use_container_width=True,
-    height=300
-)
+with right_col:
+    st.subheader("⚙️ ML ALPHA ENGINE TARGETS")
+    if state and "signals" in state and "target_weights" in state:
+        signals = state["signals"]
+        targets = state["target_weights"]
+        
+        target_data = []
+        # Merge signals and weights where they overlap or are explicitly tracked
+        all_syms = set(signals.keys()).union(set(targets.keys()))
+        for sym in all_syms:
+            if sym in targets and targets[sym] > 0:
+                target_data.append({
+                    "Symbol": sym,
+                    "Conviction (Alpha)": f"{signals.get(sym, 0.0):.4f}",
+                    "Target Weight": f"{targets.get(sym, 0.0)*100:.2f}%",
+                    "Target Notional": f"${(targets.get(sym, 0.0) * equity):,.2f}"
+                })
+        
+        df_tgt = pd.DataFrame(target_data)
+        if not df_tgt.empty:
+            df_tgt = df_tgt.sort_values("Target Weight", ascending=False)
+            st.dataframe(df_tgt, use_container_width=True, hide_index=True)
+        else:
+            st.info("System currently commands 100% Cash / No active signals.")
+    else:
+        st.warning("No backend live state generated yet. Waiting for `live_trader.py` cycle.")

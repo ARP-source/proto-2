@@ -64,9 +64,10 @@ class AlpacaExecutionClient:
             if i < slices - 1:
                 time.sleep(interval_seconds)
 
-    def rebalance_portfolio(self, target_weights: Dict[str, float]):
+    def rebalance_portfolio(self, target_weights: Dict[str, float], current_prices: Dict[str, float] = None):
         """
         Takes target constrained weights from the Risk Manager and executes them.
+        Diffs against current positions and dispatches delta orders.
         """
         if not target_weights:
             logger.info("Empty target weights provided. Flattening portfolio.")
@@ -79,23 +80,61 @@ class AlpacaExecutionClient:
             return
             
         # Get current positions
-        current_positions = {p.symbol: float(p.qty) for p in self.trading_client.get_all_positions()}
-        
-        # We need current prices to convert weights to quantities (or use notional value API if available)
-        # For simplicity in this shell, assuming we have a mechanism to fetch current price:
-        # Pseucode: prices = self.get_current_prices(target_weights.keys())
-        
+        try:
+            current_positions = {p.symbol: float(p.qty) for p in self.trading_client.get_all_positions()}
+        except Exception as e:
+            logger.error(f"Failed to fetch open positions: {e}")
+            current_positions = {}
+            
         logger.info(f"Target rebalance weights: {target_weights}")
-        # Implementation of diffing current_positions vs target quantities goes here
-        # For large diffs, route to execute_twap() instead of submit_order() directly
         
-        # Example dummy dispatch:
-        # for symbol, weight in target_weights.items():
-        #     target_notional = capital * weight
-        #     qty = target_notional / current_price
-        #     delta = qty - current_positions.get(symbol, 0)
-        #     if abs(delta) > LARGE_ORDER_THRESHOLD:
-        #         self.execute_twap(symbol, delta, side, slices=10)
-        #     else:
-        #         self.trading_client.submit_order(...)
-        pass
+        if not current_prices:
+            logger.error("Current prices must be provided to map weights to quantities.")
+            return
+
+        LARGE_ORDER_THRESHOLD = 500  # Example threshold for TWAP (shares)
+
+        for symbol, weight in target_weights.items():
+            if symbol not in current_prices:
+                logger.warning(f"No current price for {symbol}, safely skipping.")
+                continue
+
+            current_price = current_prices[symbol]
+            target_notional = capital * weight
+            target_qty = int(target_notional / current_price) # Alpaca prefers whole shares or standard fractions
+            
+            current_qty = current_positions.get(symbol, 0.0)
+            delta_qty = target_qty - current_qty
+            
+            if abs(delta_qty) < 1.0: # Ignore fractional share rounding noise for now
+                continue
+                
+            side = OrderSide.BUY if delta_qty > 0 else OrderSide.SELL
+            abs_delta = abs(delta_qty)
+            
+            logger.info(f"Dispatching Order for {symbol}: Delta={delta_qty} (Target: {target_qty}, Current: {current_qty})")
+
+            if abs_delta > LARGE_ORDER_THRESHOLD:
+                # Slices logic for large blocks
+                self.execute_twap(symbol, abs_delta, side, slices=5, interval_seconds=10)
+            else:
+                # Standard dispatch
+                try:
+                    order_data = MarketOrderRequest(
+                        symbol=symbol,
+                        qty=abs_delta,
+                        side=side,
+                        time_in_force=TimeInForce.DAY
+                    )
+                    self.trading_client.submit_order(order_data=order_data)
+                except Exception as e:
+                    logger.error(f"Failed to submit order for {symbol}: {e}")
+
+        # Handle sells for targets that dropped to 0 weight
+        for symbol, current_qty in current_positions.items():
+            if symbol not in target_weights or target_weights[symbol] == 0:
+                logger.info(f"Liquidating position {symbol} since target weight is 0.")
+                try:
+                    self.trading_client.close_position(symbol)
+                except Exception as e:
+                    logger.error(f"Failed to close position {symbol}: {e}")
